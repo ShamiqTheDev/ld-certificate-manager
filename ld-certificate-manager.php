@@ -16,12 +16,12 @@ add_action( 'admin_menu', 'ld_certificate_manager_menu' );
 
 function ld_certificate_manager_menu() {
     add_submenu_page(
-        'learndash-lms', // Parent slug
-        'WPC Manage Certificates', // Page title
-        'WPC Manage Certificates', // Menu title
-        'manage_options', // Capability
-        'wpc-manage-certificates', // Menu slug
-        'ld_certificate_manager_page' // Callback function
+        'learndash-lms',
+        'WPC Manage Certificates',
+        'WPC Manage Certificates',
+        'manage_options',
+        'wpc-manage-certificates',
+        'ld_certificate_manager_page'
     );
 }
 
@@ -117,7 +117,6 @@ function ld_certificate_manager_table( $search_query ) {
     }
 }
 
-// Hook to add export functionality
 add_action( 'admin_init', 'ld_certificate_manager_export' );
 
 function ld_certificate_manager_export() {
