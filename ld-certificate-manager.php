@@ -11,6 +11,102 @@ if ( ! defined( 'ABSPATH' ) ) {
     exit;
 }
 
+if ( ! class_exists( 'WP_List_Table' ) ) {
+    require_once ABSPATH . 'wp-admin/includes/class-wp-list-table.php';
+}
+
+class LDCertificateManagerTable extends WP_List_Table {
+
+    public function __construct() {
+        parent::__construct([
+            'singular' => __('Certificate', 'ldc'),
+            'plural'   => __('Certificates', 'ldc'),
+            'ajax'     => false
+        ]);
+    }
+
+    public function get_columns() {
+        $columns = [
+            'cb'                => '<input type="checkbox" />',
+            'certificate_name'  => __('Certificate Name', 'ldc'),
+            'student_name'      => __('Student Name', 'ldc'),
+            'user_email'        => __('Student Email', 'ldc'),
+            'course_quiz_title' => __('Course/Quiz Titles', 'ldc'),
+            'date_time'         => __('Date/Time', 'ldc')
+        ];
+        return $columns;
+    }
+
+    protected function column_default($item, $column_name) {
+        switch ($column_name) {
+            case 'certificate_name':
+            case 'student_name':
+            case 'user_email':
+            case 'course_quiz_title':
+            case 'date_time':
+                return $item[$column_name];
+            default:
+                return print_r($item, true);
+        }
+    }
+
+    protected function column_cb($item) {
+        return sprintf(
+            '<input type="checkbox" name="bulk-delete[]" value="%s" />', $item['certificate_id']
+        );
+    }
+
+    protected function get_sortable_columns() {
+        $sortable_columns = [
+            'certificate_name'  => ['certificate_name', true],
+            'student_name'      => ['student_name', false],
+            'user_email'        => ['user_email', false],
+            'course_quiz_title' => ['course_quiz_title', false],
+            'date_time'         => ['date_time', false]
+        ];
+        return $sortable_columns;
+    }
+
+    public function prepare_items() {
+        global $wpdb;
+
+        $search_query = isset($_POST['search']) ? sanitize_text_field($_POST['search']) : '';
+
+        $per_page = 10;
+        $current_page = $this->get_pagenum();
+
+        $query = get_query($search_query);
+        $total_items = $wpdb->query($query);
+
+        $query .= " LIMIT " . ($per_page * ($current_page - 1)) . ", " . $per_page;
+        $results = $wpdb->get_results($query, ARRAY_A);
+
+        $columns  = $this->get_columns();
+        $hidden   = [];
+        $sortable = $this->get_sortable_columns();
+        $this->_column_headers = [$columns, $hidden, $sortable];
+
+        usort($results, [$this, 'usort_reorder']);
+
+        $this->items = $results;
+
+        // Set the pagination arguments
+        $this->set_pagination_args([
+            'total_items' => $total_items,
+            'per_page'    => $per_page,
+            'total_pages' => ceil($total_items / $per_page)
+        ]);
+    }
+
+
+    protected function usort_reorder($a, $b) {
+        $orderby = (!empty($_REQUEST['orderby'])) ? $_REQUEST['orderby'] : 'certificate_name';
+        $order = (!empty($_REQUEST['order'])) ? $_REQUEST['order'] : 'asc';
+        $result = strcmp($a[$orderby], $b[$orderby]);
+        return ($order === 'asc') ? $result : -$result;
+    }
+}
+
 // Hook to add the menu
 add_action( 'admin_menu', 'ld_certificate_manager_menu' );
 
@@ -31,16 +127,14 @@ function ld_certificate_manager_page() {
         <h1>Manage Certificates</h1>
         <form method="post">
             <input type="text" name="search" placeholder="Search..."
-                value="<?php echo isset($_POST['search']) ? esc_attr($_POST['search']) : ''; ?>">
+                   value="<?php echo isset($_POST['search']) ? esc_attr($_POST['search']) : ''; ?>">
             <input type="submit" value="Search" class="button-primary">
             <input type="submit" name="export_csv" value="Export CSV" class="button-secondary">
         </form>
         <?php
-        // Handle search
-        $search_query = isset($_POST['search']) ? sanitize_text_field($_POST['search']) : '';
-
-        // Display the table
-        ld_certificate_manager_table( $search_query );
+        $certificateTable = new LDCertificateManagerTable();
+        $certificateTable->prepare_items();
+        $certificateTable->display();
         ?>
     </div>
     <?php
@@ -84,65 +178,29 @@ function get_query($search_query = "") {
     return $query;
 }
 
-function ld_certificate_manager_table( $search_query ) {
-    global $wpdb;
-
-    // Query to get certificates
-    $query = get_query($search_query);
-
-    $results = $wpdb->get_results( $query );
-
-    if ( ! empty( $results ) ) {
-
-
-        echo '<table class="wp-list-table widefat fixed striped">';
-        echo '<thead><tr><th>Certificate Name</th><th>Student Name/Email</th><th>Course/Quiz Titles</th><th>Date/Time</th></tr></thead>';
-        echo '<tbody>';
-
-        foreach ( $results as $row ) {
-
-            $formatted_date_time = date_i18n(get_option('date_format'), strtotime($row->date_time));
-
-            echo '<tr>';
-            echo '<td>' . esc_html( $row->certificate_name ) . '</td>';
-            echo '<td>' . esc_html( $row->student_name ) . ' / ' . esc_html( $row->user_email ) . '</td>';
-            echo '<td>' . esc_html( $row->course_quiz_title ) . '</td>';
-            echo '<td>' . esc_html( $formatted_date_time ) . '</td>';
-            echo '</tr>';
-        }
-
-        echo '</tbody></table>';
-    } else {
-        echo '<p>No certificates found.</p>';
-    }
-}
-
 add_action( 'admin_init', 'ld_certificate_manager_export' );
 
 function ld_certificate_manager_export() {
-    if ( isset( $_POST['export_csv'] ) ) {
+    if (isset($_POST['export_csv'])) {
         global $wpdb;
 
-        // Retrieve search query
         $search_query = isset($_POST['search']) ? sanitize_text_field($_POST['search']) : '';
 
-        // Query to get certificates
         $query = get_query($search_query);
+        $results = $wpdb->get_results($query, ARRAY_A);
 
-        $results = $wpdb->get_results( $query );
+        if (!empty($results)) {
+            header('Content-Type: text/csv; charset=utf-8');
+            header('Content-Disposition: attachment; filename=certificates.csv');
 
-        if ( ! empty( $results ) ) {
-            header( 'Content-Type: text/csv; charset=utf-8' );
-            header( 'Content-Disposition: attachment; filename=certificates.csv' );
+            $output = fopen('php://output', 'w');
+            fputcsv($output, array('Certificate Name', 'Student Name', 'Student Email', 'Course/Quiz Titles', 'Date/Time'));
 
-            $output = fopen( 'php://output', 'w' );
-            fputcsv( $output, array( 'Certificate Name', 'Student Name', 'Student Email', 'Course/Quiz Titles', 'Date/Time' ) );
-
-            foreach ( $results as $row ) {
-                fputcsv( $output, array( $row->certificate_name, $row->student_name, $row->user_email, $row->course_quiz_title, $row->date_time ) );
+            foreach ($results as $row) {
+                fputcsv($output, array($row['certificate_name'], $row['student_name'], $row['user_email'], $row['course_quiz_title'], $row['date_time']));
             }
 
-            fclose( $output );
+            fclose($output);
             exit;
         }
     }
